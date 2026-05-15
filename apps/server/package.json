@@ -1,44 +1,49 @@
 {
   "name": "t3",
-  "version": "0.0.10",
+  "version": "0.0.24",
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/pingdotgg/t3code",
     "directory": "apps/server"
   },
   "bin": {
-    "t3": "./dist/index.mjs"
+    "t3": "./dist/bin.mjs"
   },
   "files": [
     "dist"
   ],
   "type": "module",
   "scripts": {
-    "dev": "bun run src/index.ts",
+    "dev": "node --watch src/bin.ts",
     "build": "node scripts/cli.ts build",
-    "start": "node dist/index.mjs",
-    "prepare": "effect-language-service patch",
+    "build:bundle": "tsdown",
+    "start": "node dist/bin.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
   "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.2.111",
+    "@effect/platform-bun": "catalog:",
     "@effect/platform-node": "catalog:",
+    "@effect/platform-node-shared": "catalog:",
     "@effect/sql-sqlite-bun": "catalog:",
-    "@pierre/diffs": "^1.1.0-beta.16",
+    "@opencode-ai/sdk": "^1.3.15",
+    "@pierre/diffs": "catalog:",
     "effect": "catalog:",
-    "node-pty": "^1.1.0",
-    "open": "^10.1.0",
-    "ws": "^8.18.0"
+    "node-pty": "^1.1.0"
   },
   "devDependencies": {
     "@effect/language-service": "catalog:",
     "@effect/vitest": "catalog:",
     "@t3tools/contracts": "workspace:*",
     "@t3tools/shared": "workspace:*",
+    "@t3tools/tailscale": "workspace:*",
     "@t3tools/web": "workspace:*",
     "@types/bun": "catalog:",
     "@types/node": "catalog:",
-    "@types/ws": "^8.5.13",
+    "effect-acp": "workspace:*",
+    "effect-codex-app-server": "workspace:*",
     "tsdown": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"

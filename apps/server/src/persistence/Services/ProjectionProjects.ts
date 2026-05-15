@@ -6,9 +6,11 @@
  *
  * @module ProjectionProjectRepository
  */
-import { IsoDateTime, ProjectId, ProjectScript } from "@t3tools/contracts";
-import { Option, Schema, ServiceMap } from "effect";
-import type { Effect } from "effect";
+import { IsoDateTime, ModelSelection, ProjectId, ProjectScript } from "@t3tools/contracts";
+import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
+import * as Context from "effect/Context";
+import type * as Effect from "effect/Effect";
 
 import type { ProjectionRepositoryError } from "../Errors.ts";
 
@@ -16,7 +18,7 @@ export const ProjectionProject = Schema.Struct({
   projectId: ProjectId,
   title: Schema.String,
   workspaceRoot: Schema.String,
-  defaultModel: Schema.NullOr(Schema.String),
+  defaultModelSelection: Schema.NullOr(ModelSelection),
   scripts: Schema.Array(ProjectScript),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
@@ -73,7 +75,7 @@ export interface ProjectionProjectRepositoryShape {
 /**
  * ProjectionProjectRepository - Service tag for project projection persistence.
  */
-export class ProjectionProjectRepository extends ServiceMap.Service<
+export class ProjectionProjectRepository extends Context.Service<
   ProjectionProjectRepository,
   ProjectionProjectRepositoryShape
 >()("t3/persistence/Services/ProjectionProjects/ProjectionProjectRepository") {}

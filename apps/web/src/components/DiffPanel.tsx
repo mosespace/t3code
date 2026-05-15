@@ -2,8 +2,17 @@ import { parsePatchFiles } from "@pierre/diffs";
 import { FileDiff, type FileDiffMetadata, Virtualizer } from "@pierre/diffs/react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useParams, useSearch } from "@tanstack/react-router";
-import { ThreadId, type TurnId } from "@t3tools/contracts";
-import { ChevronLeftIcon, ChevronRightIcon, Columns2Icon, Rows3Icon } from "lucide-react";
+import { scopeThreadRef } from "@t3tools/client-runtime";
+import type { TurnId } from "@t3tools/contracts";
+import {
+  ChevronDownIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
+  Columns2Icon,
+  PilcrowIcon,
+  Rows3Icon,
+  TextWrapIcon,
+} from "lucide-react";
 import {
   type WheelEvent as ReactWheelEvent,
   useCallback,
@@ -13,18 +22,20 @@ import {
   useState,
 } from "react";
 import { openInPreferredEditor } from "../editorPreferences";
-import { gitBranchesQueryOptions } from "~/lib/gitReactQuery";
+import { useGitStatus } from "~/lib/gitStatusState";
 import { checkpointDiffQueryOptions } from "~/lib/providerReactQuery";
 import { cn } from "~/lib/utils";
-import { readNativeApi } from "../nativeApi";
+import { readLocalApi } from "../localApi";
 import { resolvePathLinkTarget } from "../terminal-links";
 import { parseDiffRouteSearch, stripDiffSearchParams } from "../diffRouteSearch";
 import { useTheme } from "../hooks/useTheme";
 import { buildPatchCacheKey } from "../lib/diffRendering";
 import { resolveDiffThemeName } from "../lib/diffRendering";
 import { useTurnDiffSummaries } from "../hooks/useTurnDiffSummaries";
-import { useStore } from "../store";
-import { useAppSettings } from "../appSettings";
+import { selectProjectByRef, useStore } from "../store";
+import { createThreadSelectorByRef } from "../storeSelectors";
+import { buildThreadRouteParams, resolveThreadRouteRef } from "../threadRoutes";
+import { useSettings } from "../hooks/useSettings";
 import { formatShortTimestamp } from "../timestampFormat";
 import { DiffPanelLoadingState, DiffPanelShell, type DiffPanelMode } from "./DiffPanelShell";
 import { ToggleGroup, Toggle } from "./ui/toggle-group";
@@ -151,6 +162,21 @@ function buildFileDiffRenderKey(fileDiff: FileDiffMetadata): string {
   return fileDiff.cacheKey ?? `${fileDiff.prevName ?? "none"}:${fileDiff.name}`;
 }
 
+function getDiffCollapseIconClassName(fileDiff: FileDiffMetadata): string {
+  switch (fileDiff.type) {
+    case "new":
+      return "text-[var(--diffs-addition-base)]";
+    case "deleted":
+      return "text-[var(--diffs-deletion-base)]";
+    case "change":
+    case "rename-pure":
+    case "rename-changed":
+      return "text-[var(--diffs-modified-base)]";
+    default:
+      return "text-muted-foreground/80";
+  }
+}
+
 interface DiffPanelProps {
   mode?: DiffPanelMode;
 }
@@ -160,28 +186,43 @@ export { DiffWorkerPoolProvider } from "./DiffWorkerPoolProvider";
 export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
   const navigate = useNavigate();
   const { resolvedTheme } = useTheme();
-  const { settings } = useAppSettings();
+  const settings = useSettings();
   const [diffRenderMode, setDiffRenderMode] = useState<DiffRenderMode>("stacked");
+  const [diffWordWrap, setDiffWordWrap] = useState(settings.diffWordWrap);
+  const [diffIgnoreWhitespace, setDiffIgnoreWhitespace] = useState(settings.diffIgnoreWhitespace);
+  const [collapsedDiffFileKeys, setCollapsedDiffFileKeys] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
   const patchViewportRef = useRef<HTMLDivElement>(null);
   const turnStripRef = useRef<HTMLDivElement>(null);
+  const previousDiffOpenRef = useRef(false);
   const [canScrollTurnStripLeft, setCanScrollTurnStripLeft] = useState(false);
   const [canScrollTurnStripRight, setCanScrollTurnStripRight] = useState(false);
-  const routeThreadId = useParams({
+  const routeThreadRef = useParams({
     strict: false,
-    select: (params) => (params.threadId ? ThreadId.makeUnsafe(params.threadId) : null),
+    select: (params) => resolveThreadRouteRef(params),
   });
   const diffSearch = useSearch({ strict: false, select: (search) => parseDiffRouteSearch(search) });
-  const activeThreadId = routeThreadId;
-  const activeThread = useStore((store) =>
-    activeThreadId ? store.threads.find((thread) => thread.id === activeThreadId) : undefined,
+  const diffOpen = diffSearch.diff === "1";
+  const activeThreadId = routeThreadRef?.threadId ?? null;
+  const activeThread = useStore(
+    useMemo(() => createThreadSelectorByRef(routeThreadRef), [routeThreadRef]),
   );
   const activeProjectId = activeThread?.projectId ?? null;
   const activeProject = useStore((store) =>
-    activeProjectId ? store.projects.find((project) => project.id === activeProjectId) : undefined,
+    activeThread && activeProjectId
+      ? selectProjectByRef(store, {
+          environmentId: activeThread.environmentId,
+          projectId: activeProjectId,
+        })
+      : undefined,
   );
   const activeCwd = activeThread?.worktreePath ?? activeProject?.cwd;
-  const gitBranchesQuery = useQuery(gitBranchesQueryOptions(activeCwd ?? null));
-  const isGitRepo = gitBranchesQuery.data?.isRepo ?? true;
+  const gitStatusQuery = useGitStatus({
+    environmentId: activeThread?.environmentId ?? null,
+    cwd: activeCwd ?? null,
+  });
+  const isGitRepo = gitStatusQuery.data?.isRepo ?? true;
   const { turnDiffSummaries, inferredCheckpointTurnCountByTurnId } =
     useTurnDiffSummaries(activeThread);
   const orderedTurnDiffSummaries = useMemo(
@@ -253,9 +294,11 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
   }, [orderedTurnDiffSummaries, selectedTurn]);
   const activeCheckpointDiffQuery = useQuery(
     checkpointDiffQueryOptions({
+      environmentId: activeThread?.environmentId ?? null,
       threadId: activeThreadId,
       fromTurnCount: activeCheckpointRange?.fromTurnCount ?? null,
       toTurnCount: activeCheckpointRange?.toTurnCount ?? null,
+      ignoreWhitespace: diffIgnoreWhitespace,
       cacheScope: selectedTurn ? `turn:${selectedTurn.turnId}` : conversationCacheScope,
       enabled: isGitRepo,
     }),
@@ -294,6 +337,27 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
   }, [renderablePatch]);
 
   useEffect(() => {
+    if (renderableFiles.length === 0) {
+      setCollapsedDiffFileKeys((current) => (current.size === 0 ? current : new Set()));
+      return;
+    }
+
+    const visibleFileKeys = new Set(renderableFiles.map(buildFileDiffRenderKey));
+    setCollapsedDiffFileKeys((current) => {
+      const next = new Set([...current].filter((fileKey) => visibleFileKeys.has(fileKey)));
+      return next.size === current.size ? current : next;
+    });
+  }, [renderableFiles]);
+
+  useEffect(() => {
+    if (diffOpen && !previousDiffOpenRef.current) {
+      setDiffWordWrap(settings.diffWordWrap);
+      setDiffIgnoreWhitespace(settings.diffIgnoreWhitespace);
+    }
+    previousDiffOpenRef.current = diffOpen;
+  }, [diffOpen, settings.diffIgnoreWhitespace, settings.diffWordWrap]);
+
+  useEffect(() => {
     if (!selectedFilePath || !patchViewportRef.current) {
       return;
     }
@@ -305,7 +369,7 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
 
   const openDiffFileInEditor = useCallback(
     (filePath: string) => {
-      const api = readNativeApi();
+      const api = readLocalApi();
       if (!api) return;
       const targetPath = activeCwd ? resolvePathLinkTarget(filePath, activeCwd) : filePath;
       void openInPreferredEditor(api, targetPath).catch((error) => {
@@ -314,12 +378,23 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
     },
     [activeCwd],
   );
+  const toggleDiffFileCollapsed = useCallback((fileKey: string) => {
+    setCollapsedDiffFileKeys((current) => {
+      const next = new Set(current);
+      if (next.has(fileKey)) {
+        next.delete(fileKey);
+      } else {
+        next.add(fileKey);
+      }
+      return next;
+    });
+  }, []);
 
   const selectTurn = (turnId: TurnId) => {
     if (!activeThread) return;
     void navigate({
-      to: "/$threadId",
-      params: { threadId: activeThread.id },
+      to: "/$environmentId/$threadId",
+      params: buildThreadRouteParams(scopeThreadRef(activeThread.environmentId, activeThread.id)),
       search: (previous) => {
         const rest = stripDiffSearchParams(previous);
         return { ...rest, diff: "1", diffTurnId: turnId };
@@ -329,8 +404,8 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
   const selectWholeConversation = () => {
     if (!activeThread) return;
     void navigate({
-      to: "/$threadId",
-      params: { threadId: activeThread.id },
+      to: "/$environmentId/$threadId",
+      params: buildThreadRouteParams(scopeThreadRef(activeThread.environmentId, activeThread.id)),
       search: (previous) => {
         const rest = stripDiffSearchParams(previous);
         return { ...rest, diff: "1" };
@@ -401,12 +476,6 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
   const headerRow = (
     <>
       <div className="relative min-w-0 flex-1 [-webkit-app-region:no-drag]">
-        {canScrollTurnStripLeft && (
-          <div className="pointer-events-none absolute inset-y-0 left-8 z-10 w-7 bg-linear-to-r from-card to-transparent" />
-        )}
-        {canScrollTurnStripRight && (
-          <div className="pointer-events-none absolute inset-y-0 right-8 z-10 w-7 bg-linear-to-l from-card to-transparent" />
-        )}
         <button
           type="button"
           className={cn(
@@ -438,6 +507,13 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
         <div
           ref={turnStripRef}
           className="turn-chip-strip flex gap-1 overflow-x-auto px-8 py-0.5"
+          style={
+            canScrollTurnStripLeft || canScrollTurnStripRight
+              ? {
+                  maskImage: `linear-gradient(to right, ${canScrollTurnStripLeft ? "transparent 24px, black 72px" : "black"}, ${canScrollTurnStripRight ? "black calc(100% - 72px), transparent calc(100% - 24px)" : "black"})`,
+                }
+              : undefined
+          }
           onWheel={onTurnStripWheel}
         >
           <button
@@ -490,25 +566,51 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
           ))}
         </div>
       </div>
-      <ToggleGroup
-        className="shrink-0 [-webkit-app-region:no-drag]"
-        variant="outline"
-        size="xs"
-        value={[diffRenderMode]}
-        onValueChange={(value) => {
-          const next = value[0];
-          if (next === "stacked" || next === "split") {
-            setDiffRenderMode(next);
-          }
-        }}
-      >
-        <Toggle aria-label="Stacked diff view" value="stacked">
-          <Rows3Icon className="size-3" />
+      <div className="flex shrink-0 items-center gap-1 [-webkit-app-region:no-drag]">
+        <ToggleGroup
+          className="shrink-0"
+          variant="outline"
+          size="xs"
+          value={[diffRenderMode]}
+          onValueChange={(value) => {
+            const next = value[0];
+            if (next === "stacked" || next === "split") {
+              setDiffRenderMode(next);
+            }
+          }}
+        >
+          <Toggle aria-label="Stacked diff view" value="stacked">
+            <Rows3Icon className="size-3" />
+          </Toggle>
+          <Toggle aria-label="Split diff view" value="split">
+            <Columns2Icon className="size-3" />
+          </Toggle>
+        </ToggleGroup>
+        <Toggle
+          aria-label={diffWordWrap ? "Disable diff line wrapping" : "Enable diff line wrapping"}
+          title={diffWordWrap ? "Disable line wrapping" : "Enable line wrapping"}
+          variant="outline"
+          size="xs"
+          pressed={diffWordWrap}
+          onPressedChange={(pressed) => {
+            setDiffWordWrap(Boolean(pressed));
+          }}
+        >
+          <TextWrapIcon className="size-3" />
         </Toggle>
-        <Toggle aria-label="Split diff view" value="split">
-          <Columns2Icon className="size-3" />
+        <Toggle
+          aria-label={diffIgnoreWhitespace ? "Show whitespace changes" : "Hide whitespace changes"}
+          title={diffIgnoreWhitespace ? "Show whitespace changes" : "Hide whitespace changes"}
+          variant="outline"
+          size="xs"
+          pressed={diffIgnoreWhitespace}
+          onPressedChange={(pressed) => {
+            setDiffIgnoreWhitespace(Boolean(pressed));
+          }}
+        >
+          <PilcrowIcon className="size-3" />
         </Toggle>
-      </ToggleGroup>
+      </div>
     </>
   );
 
@@ -561,11 +663,12 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
                   const filePath = resolveFileDiffPath(fileDiff);
                   const fileKey = buildFileDiffRenderKey(fileDiff);
                   const themedFileKey = `${fileKey}:${resolvedTheme}`;
+                  const collapsed = collapsedDiffFileKeys.has(fileKey);
                   return (
                     <div
                       key={themedFileKey}
                       data-diff-file-path={filePath}
-                      className="diff-render-file mb-2 rounded-md first:mt-2 last:mb-0"
+                      className="diff-render-file group/diff-file mb-2 rounded-md first:mt-2 last:mb-0"
                       onClickCapture={(event) => {
                         const nativeEvent = event.nativeEvent as MouseEvent;
                         const composedPath = nativeEvent.composedPath?.() ?? [];
@@ -579,9 +682,33 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
                     >
                       <FileDiff
                         fileDiff={fileDiff}
+                        renderHeaderPrefix={() => (
+                          <button
+                            type="button"
+                            className={cn(
+                              "inline-flex size-5 shrink-0 cursor-pointer items-center justify-center rounded-sm border-0 bg-transparent p-0 transition-colors hover:bg-foreground/10 focus-visible:outline-hidden",
+                              getDiffCollapseIconClassName(fileDiff),
+                            )}
+                            aria-label={collapsed ? `Expand ${filePath}` : `Collapse ${filePath}`}
+                            aria-expanded={!collapsed}
+                            title={collapsed ? "Expand diff" : "Collapse diff"}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              toggleDiffFileCollapsed(fileKey);
+                            }}
+                          >
+                            {collapsed ? (
+                              <ChevronRightIcon className="size-4" />
+                            ) : (
+                              <ChevronDownIcon className="size-4" />
+                            )}
+                          </button>
+                        )}
                         options={{
+                          collapsed,
                           diffStyle: diffRenderMode === "split" ? "split" : "unified",
                           lineDiffType: "none",
+                          overflow: diffWordWrap ? "wrap" : "scroll",
                           theme: resolveDiffThemeName(resolvedTheme),
                           themeType: resolvedTheme as DiffThemeType,
                           unsafeCSS: DIFF_PANEL_UNSAFE_CSS,
@@ -595,7 +722,14 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
               <div className="h-full overflow-auto p-2">
                 <div className="space-y-2">
                   <p className="text-[11px] text-muted-foreground/75">{renderablePatch.reason}</p>
-                  <pre className="max-h-[72vh] overflow-auto rounded-md border border-border/70 bg-background/70 p-3 font-mono text-[11px] leading-relaxed text-muted-foreground/90">
+                  <pre
+                    className={cn(
+                      "max-h-[72vh] rounded-md border border-border/70 bg-background/70 p-3 font-mono text-[11px] leading-relaxed text-muted-foreground/90",
+                      diffWordWrap
+                        ? "overflow-auto whitespace-pre-wrap wrap-break-word"
+                        : "overflow-auto",
+                    )}
+                  >
                     {renderablePatch.text}
                   </pre>
                 </div>

@@ -14,16 +14,21 @@ export default mergeConfig(
         "~": srcPath,
       },
     },
+    server: {
+      // The app dev server uses a fixed port, but browser tests need to allow
+      // concurrent runs to claim the next available port.
+      strictPort: false,
+    },
     test: {
-      include: [
-        "src/components/ChatView.browser.tsx",
-        "src/components/KeybindingsToast.browser.tsx",
-      ],
+      include: ["src/components/**/*.browser.tsx"],
       browser: {
         enabled: true,
         provider: playwright(),
         instances: [{ browser: "chromium" }],
         headless: true,
+        api: {
+          strictPort: false,
+        },
       },
       testTimeout: 30_000,
       hookTimeout: 30_000,

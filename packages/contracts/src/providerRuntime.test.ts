@@ -1,16 +1,33 @@
 import { describe, expect, it } from "vitest";
-import { Schema } from "effect";
+import * as Schema from "effect/Schema";
 
-import { ProviderRuntimeEvent } from "./providerRuntime";
+import { ProviderRuntimeEvent } from "./providerRuntime.ts";
 
 const decodeRuntimeEvent = Schema.decodeUnknownSync(ProviderRuntimeEvent);
 
 describe("ProviderRuntimeEvent", () => {
+  it("accepts fork-provided driver kinds as branded slugs", () => {
+    const parsed = decodeRuntimeEvent({
+      type: "session.started",
+      eventId: "event-ollama-session",
+      provider: "ollama",
+      providerInstanceId: "ollama_local",
+      createdAt: "2026-02-28T00:00:00.000Z",
+      threadId: "thread-1",
+      payload: {
+        message: "started",
+      },
+    });
+
+    expect(parsed.provider).toBe("ollama");
+    expect(parsed.providerInstanceId).toBe("ollama_local");
+  });
+
   it("decodes turn.plan.updated for plan rendering", () => {
     const parsed = decodeRuntimeEvent({
       type: "turn.plan.updated",
       eventId: "event-1",
-      provider: "codex",
+      provider: "claudeAgent",
       sessionId: "runtime-session-1",
       createdAt: "2026-02-28T00:00:00.000Z",
       threadId: "thread-1",
@@ -56,7 +73,7 @@ describe("ProviderRuntimeEvent", () => {
     const parsed = decodeRuntimeEvent({
       type: "user-input.requested",
       eventId: "event-2",
-      provider: "codex",
+      provider: "claudeAgent",
       sessionId: "runtime-session-2",
       createdAt: "2026-02-28T00:00:01.000Z",
       threadId: "thread-2",
@@ -94,7 +111,7 @@ describe("ProviderRuntimeEvent", () => {
     const parsed = decodeRuntimeEvent({
       type: "user-input.resolved",
       eventId: "event-3",
-      provider: "codex",
+      provider: "claudeAgent",
       sessionId: "runtime-session-2",
       createdAt: "2026-02-28T00:00:02.000Z",
       threadId: "thread-2",
@@ -138,5 +155,30 @@ describe("ProviderRuntimeEvent", () => {
         payload: { message: "boom" },
       }),
     ).toThrow();
+  });
+
+  it("decodes normalized thread token usage snapshots", () => {
+    const parsed = decodeRuntimeEvent({
+      type: "thread.token-usage.updated",
+      eventId: "event-token-usage-1",
+      provider: "claudeAgent",
+      createdAt: "2026-02-28T00:00:04.000Z",
+      threadId: "thread-1",
+      payload: {
+        usage: {
+          usedTokens: 31251,
+          maxTokens: 200000,
+          toolUses: 25,
+          durationMs: 43567,
+        },
+      },
+    });
+
+    expect(parsed.type).toBe("thread.token-usage.updated");
+    if (parsed.type !== "thread.token-usage.updated") {
+      throw new Error("expected thread.token-usage.updated");
+    }
+    expect(parsed.payload.usage.maxTokens).toBe(200000);
+    expect(parsed.payload.usage.usedTokens).toBe(31251);
   });
 });

@@ -1,10 +1,11 @@
+// @effect-diagnostics nodeBuiltinImport:off
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
 import { ThreadId } from "@t3tools/contracts";
 import { assert, describe, it } from "@effect/vitest";
-import { Effect } from "effect";
+import * as Effect from "effect/Effect";
 
 import { makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
 
@@ -42,11 +43,11 @@ describe("EventNdjsonLogger", () => {
 
         yield* logger.write(
           { threadId: "provider-thread-1", id: "evt-1" },
-          ThreadId.makeUnsafe("thread-1"),
+          ThreadId.make("thread-1"),
         );
         yield* logger.write(
           { type: "turn.completed", threadId: "provider-thread-2", id: "evt-2" },
-          ThreadId.makeUnsafe("thread-2"),
+          ThreadId.make("thread-2"),
         );
         yield* logger.close();
 
@@ -112,6 +113,49 @@ describe("EventNdjsonLogger", () => {
       }),
   );
 
+  it.effect("serializes concurrent first writes for the same segment", () =>
+    Effect.gen(function* () {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "t3-provider-log-"));
+      const basePath = path.join(tempDir, "provider-canonical.ndjson");
+
+      try {
+        const logger = yield* makeEventNdjsonLogger(basePath, {
+          stream: "canonical",
+          batchWindowMs: 0,
+        });
+        assert.notEqual(logger, undefined);
+        if (!logger) {
+          return;
+        }
+
+        yield* Effect.all(
+          [
+            logger.write({ id: "evt-concurrent-1" }, null),
+            logger.write({ id: "evt-concurrent-2" }, null),
+          ],
+          { concurrency: "unbounded" },
+        );
+        yield* logger.close();
+
+        const globalPath = path.join(tempDir, "_global.log");
+        assert.equal(fs.existsSync(globalPath), true);
+        const lines = fs
+          .readFileSync(globalPath, "utf8")
+          .trim()
+          .split("\n")
+          .map((line) => parseLogLine(line));
+
+        assert.equal(lines.length, 2);
+        assert.deepEqual(lines.map((line) => line.payload).toSorted(), [
+          '{"id":"evt-concurrent-1"}',
+          '{"id":"evt-concurrent-2"}',
+        ]);
+      } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
+    }),
+  );
+
   it.effect("rotates per-thread files when max size is exceeded", () =>
     Effect.gen(function* () {
       const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "t3-provider-log-"));
@@ -135,7 +179,7 @@ describe("EventNdjsonLogger", () => {
               id: `evt-${index}`,
               payload: "x".repeat(40),
             },
-            ThreadId.makeUnsafe("thread-rotate"),
+            ThreadId.make("thread-rotate"),
           );
         }
         yield* logger.close();

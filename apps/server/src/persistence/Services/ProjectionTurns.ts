@@ -11,13 +11,16 @@ import {
   IsoDateTime,
   MessageId,
   NonNegativeInt,
+  OrchestrationProposedPlanId,
   OrchestrationCheckpointFile,
   OrchestrationCheckpointStatus,
   ThreadId,
   TurnId,
 } from "@t3tools/contracts";
-import { Option, Schema, ServiceMap } from "effect";
-import type { Effect } from "effect";
+import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
+import * as Context from "effect/Context";
+import type * as Effect from "effect/Effect";
 
 import type { ProjectionRepositoryError } from "../Errors.ts";
 
@@ -34,6 +37,8 @@ export const ProjectionTurn = Schema.Struct({
   threadId: ThreadId,
   turnId: Schema.NullOr(TurnId),
   pendingMessageId: Schema.NullOr(MessageId),
+  sourceProposedPlanThreadId: Schema.NullOr(ThreadId),
+  sourceProposedPlanId: Schema.NullOr(OrchestrationProposedPlanId),
   assistantMessageId: Schema.NullOr(MessageId),
   state: ProjectionTurnState,
   requestedAt: IsoDateTime,
@@ -50,6 +55,8 @@ export const ProjectionTurnById = Schema.Struct({
   threadId: ThreadId,
   turnId: TurnId,
   pendingMessageId: Schema.NullOr(MessageId),
+  sourceProposedPlanThreadId: Schema.NullOr(ThreadId),
+  sourceProposedPlanId: Schema.NullOr(OrchestrationProposedPlanId),
   assistantMessageId: Schema.NullOr(MessageId),
   state: ProjectionTurnState,
   requestedAt: IsoDateTime,
@@ -65,6 +72,8 @@ export type ProjectionTurnById = typeof ProjectionTurnById.Type;
 export const ProjectionPendingTurnStart = Schema.Struct({
   threadId: ThreadId,
   messageId: MessageId,
+  sourceProposedPlanThreadId: Schema.NullOr(ThreadId),
+  sourceProposedPlanId: Schema.NullOr(OrchestrationProposedPlanId),
   requestedAt: IsoDateTime,
 });
 export type ProjectionPendingTurnStart = typeof ProjectionPendingTurnStart.Type;
@@ -155,7 +164,7 @@ export interface ProjectionTurnRepositoryShape {
   ) => Effect.Effect<void, ProjectionRepositoryError>;
 }
 
-export class ProjectionTurnRepository extends ServiceMap.Service<
+export class ProjectionTurnRepository extends Context.Service<
   ProjectionTurnRepository,
   ProjectionTurnRepositoryShape
 >()("t3/persistence/Services/ProjectionTurns/ProjectionTurnRepository") {}

@@ -6,8 +6,9 @@
  *
  * @module ProviderRuntimeIngestionService
  */
-import { ServiceMap } from "effect";
-import type { Effect, Scope } from "effect";
+import * as Context from "effect/Context";
+import type * as Effect from "effect/Effect";
+import type * as Scope from "effect/Scope";
 
 /**
  * ProviderRuntimeIngestionShape - Service API for runtime ingestion lifecycle.
@@ -22,7 +23,7 @@ export interface ProviderRuntimeIngestionShape {
    * Uses an internal queue and continues after non-interrupt failures by
    * logging warnings.
    */
-  readonly start: Effect.Effect<void, never, Scope.Scope>;
+  readonly start: () => Effect.Effect<void, never, Scope.Scope>;
 
   /**
    * Resolves when the internal processing queue is empty and idle.
@@ -34,7 +35,7 @@ export interface ProviderRuntimeIngestionShape {
 /**
  * ProviderRuntimeIngestionService - Service tag for runtime ingestion workers.
  */
-export class ProviderRuntimeIngestionService extends ServiceMap.Service<
+export class ProviderRuntimeIngestionService extends Context.Service<
   ProviderRuntimeIngestionService,
   ProviderRuntimeIngestionShape
 >()("t3/orchestration/Services/ProviderRuntimeIngestion/ProviderRuntimeIngestionService") {}

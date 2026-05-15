@@ -1,4 +1,4 @@
-import { Schema } from "effect";
+import * as Schema from "effect/Schema";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -11,7 +11,7 @@ import {
   TerminalSessionSnapshot,
   TerminalThreadInput,
   TerminalWriteInput,
-} from "./terminal";
+} from "./terminal.ts";
 
 function decodeSync<S extends Schema.Top>(schema: S, input: unknown): Schema.Schema.Type<S> {
   return Schema.decodeUnknownSync(schema as never)(input) as Schema.Schema.Type<S>;
@@ -38,13 +38,24 @@ describe("TerminalOpenInput", () => {
     ).toBe(true);
   });
 
+  it("accepts ultrawide terminal dimensions from xterm fit", () => {
+    expect(
+      decodes(TerminalOpenInput, {
+        threadId: "thread-1",
+        cwd: "/tmp/project",
+        cols: 423,
+        rows: 40,
+      }),
+    ).toBe(true);
+  });
+
   it("rejects invalid bounds", () => {
     expect(
       decodes(TerminalOpenInput, {
         threadId: "thread-1",
         cwd: "/tmp/project",
         cols: 10,
-        rows: 2,
+        rows: 0,
       }),
     ).toBe(false);
   });
@@ -63,6 +74,7 @@ describe("TerminalOpenInput", () => {
     const parsed = decodeSync(TerminalOpenInput, {
       threadId: "thread-1",
       cwd: "/tmp/project",
+      worktreePath: "/tmp/project/.t3/worktrees/feature-a",
       cols: 100,
       rows: 24,
       env: {
@@ -74,6 +86,7 @@ describe("TerminalOpenInput", () => {
       T3CODE_PROJECT_ROOT: "/tmp/project",
       CUSTOM_FLAG: "1",
     });
+    expect(parsed.worktreePath).toBe("/tmp/project/.t3/worktrees/feature-a");
   });
 
   it("rejects invalid env keys", () => {
@@ -151,31 +164,36 @@ describe("TerminalCloseInput", () => {
 });
 
 describe("TerminalSessionSnapshot", () => {
+  const isoTimestamp = "2026-01-01T00:00:00.000Z";
+
   it("accepts running snapshots", () => {
     expect(
       decodes(TerminalSessionSnapshot, {
         threadId: "thread-1",
         terminalId: DEFAULT_TERMINAL_ID,
         cwd: "/tmp/project",
+        worktreePath: null,
         status: "running",
         pid: 1234,
         history: "hello\n",
         exitCode: null,
         exitSignal: null,
-        updatedAt: new Date().toISOString(),
+        updatedAt: isoTimestamp,
       }),
     ).toBe(true);
   });
 });
 
 describe("TerminalEvent", () => {
+  const isoTimestamp = "2026-01-01T00:00:00.000Z";
+
   it("accepts output events", () => {
     expect(
       decodes(TerminalEvent, {
         type: "output",
         threadId: "thread-1",
         terminalId: DEFAULT_TERMINAL_ID,
-        createdAt: new Date().toISOString(),
+        createdAt: isoTimestamp,
         data: "line\n",
       }),
     ).toBe(true);
@@ -187,7 +205,7 @@ describe("TerminalEvent", () => {
         type: "exited",
         threadId: "thread-1",
         terminalId: DEFAULT_TERMINAL_ID,
-        createdAt: new Date().toISOString(),
+        createdAt: isoTimestamp,
         exitCode: 0,
         exitSignal: null,
       }),
@@ -200,8 +218,31 @@ describe("TerminalEvent", () => {
         type: "activity",
         threadId: "thread-1",
         terminalId: DEFAULT_TERMINAL_ID,
-        createdAt: new Date().toISOString(),
+        createdAt: isoTimestamp,
         hasRunningSubprocess: true,
+      }),
+    ).toBe(true);
+  });
+
+  it("accepts started events with snapshot worktree metadata", () => {
+    expect(
+      decodes(TerminalEvent, {
+        type: "started",
+        threadId: "thread-1",
+        terminalId: DEFAULT_TERMINAL_ID,
+        createdAt: isoTimestamp,
+        snapshot: {
+          threadId: "thread-1",
+          terminalId: DEFAULT_TERMINAL_ID,
+          cwd: "/tmp/project/.t3/worktrees/feature-a",
+          worktreePath: "/tmp/project/.t3/worktrees/feature-a",
+          status: "running",
+          pid: 1234,
+          history: "",
+          exitCode: null,
+          exitSignal: null,
+          updatedAt: isoTimestamp,
+        },
       }),
     ).toBe(true);
   });

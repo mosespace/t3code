@@ -7,13 +7,17 @@
  * @module AnalyticsServiceLive
  */
 
-import { Config, DateTime, Effect, Layer, Ref } from "effect";
+import * as Config from "effect/Config";
+import * as DateTime from "effect/DateTime";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as Ref from "effect/Ref";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http";
 
 import { ServerConfig } from "../../config.ts";
 import { AnalyticsService, type AnalyticsServiceShape } from "../Services/AnalyticsService.ts";
 import { getTelemetryIdentifier } from "../Identify.ts";
-import { version } from "../../../package.json" with { type: "json" };
+import packageJson from "../../../package.json" with { type: "json" };
 
 interface BufferedAnalyticsEvent {
   readonly event: string;
@@ -70,34 +74,35 @@ const makeAnalyticsService = Effect.gen(function* () {
       }),
     );
 
-  const sendBatch = (events: ReadonlyArray<BufferedAnalyticsEvent>) =>
-    Effect.gen(function* () {
-      if (!telemetryConfig.enabled || !identifier) return;
+  const sendBatch = Effect.fn("sendBatch")(function* (
+    events: ReadonlyArray<BufferedAnalyticsEvent>,
+  ) {
+    if (!telemetryConfig.enabled || !identifier) return;
 
-      const payload = {
-        api_key: telemetryConfig.posthogKey,
-        batch: events.map((event) => ({
-          event: event.event,
-          distinct_id: identifier,
-          properties: {
-            ...event.properties,
-            $process_person_profile: false,
-            platform: process.platform,
-            wsl: process.env.WSL_DISTRO_NAME,
-            arch: process.arch,
-            t3CodeVersion: version,
-            clientType,
-          },
-          timestamp: event.capturedAt,
-        })),
-      };
+    const payload = {
+      api_key: telemetryConfig.posthogKey,
+      batch: events.map((event) => ({
+        event: event.event,
+        distinct_id: identifier,
+        properties: {
+          ...event.properties,
+          $process_person_profile: false,
+          platform: process.platform,
+          wsl: process.env.WSL_DISTRO_NAME,
+          arch: process.arch,
+          t3CodeVersion: packageJson.version,
+          clientType,
+        },
+        timestamp: event.capturedAt,
+      })),
+    };
 
-      yield* HttpClientRequest.post(`${telemetryConfig.posthogHost}/batch/`).pipe(
-        HttpClientRequest.bodyJson(payload),
-        Effect.flatMap(httpClient.execute),
-        Effect.flatMap(HttpClientResponse.filterStatusOk),
-      );
-    });
+    yield* HttpClientRequest.post(`${telemetryConfig.posthogHost}/batch/`).pipe(
+      HttpClientRequest.bodyJson(payload),
+      Effect.flatMap(httpClient.execute),
+      Effect.flatMap(HttpClientResponse.filterStatusOk),
+    );
+  });
 
   const flush: AnalyticsServiceShape["flush"] = Effect.gen(function* () {
     while (true) {
@@ -124,17 +129,19 @@ const makeAnalyticsService = Effect.gen(function* () {
     }
   }).pipe(Effect.catch((cause) => Effect.logError("Failed to flush telemetry", { cause })));
 
-  const record: AnalyticsServiceShape["record"] = Effect.fnUntraced(function* (event, properties) {
-    if (!telemetryConfig.enabled || !identifier) return;
+  const record: AnalyticsServiceShape["record"] = Effect.fn("record")(
+    function* (event, properties) {
+      if (!telemetryConfig.enabled || !identifier) return;
 
-    const enqueueResult = yield* enqueueBufferedEvent(event, properties);
-    if (enqueueResult.dropped) {
-      yield* Effect.logDebug("analytics buffer full; dropping oldest event", {
-        size: enqueueResult.size,
-        event,
-      });
-    }
-  });
+      const enqueueResult = yield* enqueueBufferedEvent(event, properties);
+      if (enqueueResult.dropped) {
+        yield* Effect.logDebug("analytics buffer full; dropping oldest event", {
+          size: enqueueResult.size,
+          event,
+        });
+      }
+    },
+  );
 
   yield* Effect.forever(Effect.sleep(1000).pipe(Effect.flatMap(() => flush)), {
     disableYield: true,

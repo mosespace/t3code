@@ -11,6 +11,8 @@ import {
   isChatNewShortcut,
   isChatNewLocalShortcut,
   isDiffToggleShortcut,
+  modelPickerJumpCommandForIndex,
+  modelPickerJumpIndexFromCommand,
   isOpenFavoriteEditorShortcut,
   isTerminalClearShortcut,
   isTerminalCloseShortcut,
@@ -18,8 +20,14 @@ import {
   isTerminalSplitShortcut,
   isTerminalToggleShortcut,
   resolveShortcutCommand,
+  shouldShowModelPickerJumpHints,
+  shouldShowThreadJumpHints,
   shortcutLabelForCommand,
+  terminalDeleteShortcutData,
   terminalNavigationShortcutData,
+  threadJumpCommandForIndex,
+  threadJumpIndexFromCommand,
+  threadTraversalDirectionFromCommand,
   type ShortcutEventLike,
 } from "./keybindings";
 
@@ -97,9 +105,39 @@ const DEFAULT_BINDINGS = compile([
     command: "diff.toggle",
     whenAst: whenNot(whenIdentifier("terminalFocus")),
   },
+  {
+    shortcut: modShortcut("k"),
+    command: "commandPalette.toggle",
+    whenAst: whenNot(whenIdentifier("terminalFocus")),
+  },
+  {
+    shortcut: modShortcut("m", { shiftKey: true }),
+    command: "modelPicker.toggle",
+    whenAst: whenNot(whenIdentifier("terminalFocus")),
+  },
   { shortcut: modShortcut("o", { shiftKey: true }), command: "chat.new" },
   { shortcut: modShortcut("n", { shiftKey: true }), command: "chat.newLocal" },
   { shortcut: modShortcut("o"), command: "editor.openFavorite" },
+  { shortcut: modShortcut("[", { shiftKey: true }), command: "thread.previous" },
+  { shortcut: modShortcut("]", { shiftKey: true }), command: "thread.next" },
+  { shortcut: modShortcut("1"), command: "thread.jump.1" },
+  { shortcut: modShortcut("2"), command: "thread.jump.2" },
+  { shortcut: modShortcut("3"), command: "thread.jump.3" },
+  {
+    shortcut: modShortcut("1"),
+    command: "modelPicker.jump.1",
+    whenAst: whenIdentifier("modelPickerOpen"),
+  },
+  {
+    shortcut: modShortcut("2"),
+    command: "modelPicker.jump.2",
+    whenAst: whenIdentifier("modelPickerOpen"),
+  },
+  {
+    shortcut: modShortcut("3"),
+    command: "modelPicker.jump.3",
+    whenAst: whenIdentifier("modelPickerOpen"),
+  },
 ]);
 
 describe("isTerminalToggleShortcut", () => {
@@ -114,6 +152,15 @@ describe("isTerminalToggleShortcut", () => {
   it("matches Ctrl+J on non-macOS", () => {
     assert.isTrue(
       isTerminalToggleShortcut(event({ ctrlKey: true }), DEFAULT_BINDINGS, { platform: "Win32" }),
+    );
+  });
+
+  it("matches Ctrl+J on non-macOS while terminalFocus is true", () => {
+    assert.isTrue(
+      isTerminalToggleShortcut(event({ ctrlKey: true }), DEFAULT_BINDINGS, {
+        platform: "Win32",
+        context: { terminalFocus: true },
+      }),
     );
   });
 });
@@ -215,7 +262,7 @@ describe("split/new/close terminal shortcuts", () => {
 });
 
 describe("shortcutLabelForCommand", () => {
-  it("returns the most recent binding label", () => {
+  it("returns the effective binding label", () => {
     const bindings = compile([
       {
         shortcut: modShortcut("\\"),
@@ -229,17 +276,147 @@ describe("shortcutLabelForCommand", () => {
       },
     ]);
     assert.strictEqual(
-      shortcutLabelForCommand(bindings, "terminal.split", "Linux"),
+      shortcutLabelForCommand(bindings, "terminal.split", {
+        platform: "Linux",
+        context: { terminalFocus: false },
+      }),
       "Ctrl+Shift+\\",
     );
   });
 
-  it("returns labels for non-terminal commands", () => {
+  it("returns effective labels for non-terminal commands", () => {
     assert.strictEqual(shortcutLabelForCommand(DEFAULT_BINDINGS, "chat.new", "MacIntel"), "⇧⌘O");
     assert.strictEqual(shortcutLabelForCommand(DEFAULT_BINDINGS, "diff.toggle", "Linux"), "Ctrl+D");
     assert.strictEqual(
+      shortcutLabelForCommand(DEFAULT_BINDINGS, "commandPalette.toggle", "MacIntel"),
+      "⌘K",
+    );
+    assert.strictEqual(
+      shortcutLabelForCommand(DEFAULT_BINDINGS, "modelPicker.toggle", "Linux"),
+      "Ctrl+Shift+M",
+    );
+    assert.strictEqual(
       shortcutLabelForCommand(DEFAULT_BINDINGS, "editor.openFavorite", "Linux"),
       "Ctrl+O",
+    );
+    assert.strictEqual(
+      shortcutLabelForCommand(DEFAULT_BINDINGS, "thread.jump.3", "MacIntel"),
+      "⌘3",
+    );
+    assert.strictEqual(
+      shortcutLabelForCommand(DEFAULT_BINDINGS, "thread.previous", "Linux"),
+      "Ctrl+Shift+[",
+    );
+    assert.strictEqual(
+      shortcutLabelForCommand(DEFAULT_BINDINGS, "modelPicker.jump.3", {
+        platform: "MacIntel",
+        context: { modelPickerOpen: true },
+      }),
+      "⌘3",
+    );
+  });
+
+  it("returns null for commands shadowed by a later conflicting shortcut", () => {
+    const bindings = compile([
+      { shortcut: modShortcut("1", { shiftKey: true }), command: "thread.jump.1" },
+      { shortcut: modShortcut("1", { shiftKey: true }), command: "thread.jump.7" },
+    ]);
+
+    assert.isNull(shortcutLabelForCommand(bindings, "thread.jump.1", "MacIntel"));
+    assert.strictEqual(shortcutLabelForCommand(bindings, "thread.jump.7", "MacIntel"), "⇧⌘1");
+  });
+
+  it("respects when-context while resolving labels", () => {
+    const bindings = compile([
+      { shortcut: modShortcut("d"), command: "diff.toggle" },
+      {
+        shortcut: modShortcut("d"),
+        command: "terminal.split",
+        whenAst: whenIdentifier("terminalFocus"),
+      },
+    ]);
+
+    assert.strictEqual(
+      shortcutLabelForCommand(bindings, "diff.toggle", {
+        platform: "Linux",
+        context: { terminalFocus: false },
+      }),
+      "Ctrl+D",
+    );
+    assert.isNull(
+      shortcutLabelForCommand(bindings, "diff.toggle", {
+        platform: "Linux",
+        context: { terminalFocus: true },
+      }),
+    );
+    assert.strictEqual(
+      shortcutLabelForCommand(bindings, "terminal.split", {
+        platform: "Linux",
+        context: { terminalFocus: true },
+      }),
+      "Ctrl+D",
+    );
+  });
+});
+
+describe("thread navigation helpers", () => {
+  it("maps jump commands to visible thread indices", () => {
+    assert.strictEqual(threadJumpCommandForIndex(0), "thread.jump.1");
+    assert.strictEqual(threadJumpCommandForIndex(2), "thread.jump.3");
+    assert.isNull(threadJumpCommandForIndex(9));
+    assert.strictEqual(threadJumpIndexFromCommand("thread.jump.1"), 0);
+    assert.strictEqual(threadJumpIndexFromCommand("thread.jump.3"), 2);
+    assert.isNull(threadJumpIndexFromCommand("thread.next"));
+  });
+
+  it("maps traversal commands to directions", () => {
+    assert.strictEqual(threadTraversalDirectionFromCommand("thread.previous"), "previous");
+    assert.strictEqual(threadTraversalDirectionFromCommand("thread.next"), "next");
+    assert.isNull(threadTraversalDirectionFromCommand("thread.jump.1"));
+    assert.isNull(threadTraversalDirectionFromCommand(null));
+  });
+
+  it("shows jump hints only when configured modifiers match", () => {
+    assert.isTrue(
+      shouldShowThreadJumpHints(event({ metaKey: true }), DEFAULT_BINDINGS, {
+        platform: "MacIntel",
+      }),
+    );
+    assert.isFalse(
+      shouldShowThreadJumpHints(event({ metaKey: true, shiftKey: true }), DEFAULT_BINDINGS, {
+        platform: "MacIntel",
+      }),
+    );
+    assert.isTrue(
+      shouldShowThreadJumpHints(event({ ctrlKey: true }), DEFAULT_BINDINGS, {
+        platform: "Linux",
+      }),
+    );
+  });
+});
+
+describe("model picker navigation helpers", () => {
+  it("maps jump commands to visible model indices", () => {
+    assert.strictEqual(modelPickerJumpCommandForIndex(0), "modelPicker.jump.1");
+    assert.strictEqual(modelPickerJumpCommandForIndex(2), "modelPicker.jump.3");
+    assert.isNull(modelPickerJumpCommandForIndex(9));
+    assert.strictEqual(modelPickerJumpIndexFromCommand("modelPicker.jump.1"), 0);
+    assert.strictEqual(modelPickerJumpIndexFromCommand("modelPicker.jump.3"), 2);
+    assert.isNull(modelPickerJumpIndexFromCommand("thread.jump.1"));
+  });
+
+  it("shows jump hints only while the model picker context is active", () => {
+    assert.isFalse(
+      shouldShowModelPickerJumpHints(event({ metaKey: true }), DEFAULT_BINDINGS, {
+        platform: "MacIntel",
+        context: { modelPickerOpen: false },
+      }),
+    );
+    assert.isTrue(
+      shouldShowModelPickerJumpHints(event({ metaKey: true }), DEFAULT_BINDINGS, {
+        platform: "MacIntel",
+        context: { modelPickerOpen: true },
+      }),
     );
   });
 });
@@ -281,6 +458,23 @@ describe("chat/editor shortcuts", () => {
       isOpenFavoriteEditorShortcut(event({ key: "o", ctrlKey: true }), DEFAULT_BINDINGS, {
         platform: "Linux",
       }),
+    );
+  });
+
+  it("matches commandPalette.toggle shortcut outside terminal focus", () => {
+    assert.strictEqual(
+      resolveShortcutCommand(event({ key: "k", metaKey: true }), DEFAULT_BINDINGS, {
+        platform: "MacIntel",
+        context: { terminalFocus: false },
+      }),
+      "commandPalette.toggle",
+    );
+    assert.notStrictEqual(
+      resolveShortcutCommand(event({ key: "k", metaKey: true }), DEFAULT_BINDINGS, {
+        platform: "MacIntel",
+        context: { terminalFocus: true },
+      }),
+      "commandPalette.toggle",
     );
   });
 
@@ -373,6 +567,29 @@ describe("resolveShortcutCommand", () => {
       "script.setup.run",
     );
   });
+
+  it("matches bracket shortcuts using the physical key code", () => {
+    assert.strictEqual(
+      resolveShortcutCommand(
+        event({ key: "{", code: "BracketLeft", metaKey: true, shiftKey: true }),
+        DEFAULT_BINDINGS,
+        {
+          platform: "MacIntel",
+        },
+      ),
+      "thread.previous",
+    );
+    assert.strictEqual(
+      resolveShortcutCommand(
+        event({ key: "}", code: "BracketRight", ctrlKey: true, shiftKey: true }),
+        DEFAULT_BINDINGS,
+        {
+          platform: "Linux",
+        },
+      ),
+      "thread.next",
+    );
+  });
 });
 
 describe("formatShortcutLabel", () => {
@@ -409,6 +626,34 @@ describe("isTerminalClearShortcut", () => {
   it("ignores non-keydown events", () => {
     assert.isFalse(
       isTerminalClearShortcut(event({ type: "keyup", key: "l", ctrlKey: true }), "Linux"),
+    );
+  });
+});
+
+describe("terminalDeleteShortcutData", () => {
+  it("maps Cmd+Backspace on macOS to delete-to-line-start", () => {
+    assert.strictEqual(
+      terminalDeleteShortcutData(event({ key: "Backspace", metaKey: true }), "MacIntel"),
+      "\u0015",
+    );
+  });
+
+  it("ignores non-macOS platforms and modified variants", () => {
+    assert.isNull(terminalDeleteShortcutData(event({ key: "Backspace", metaKey: true }), "Linux"));
+    assert.isNull(
+      terminalDeleteShortcutData(
+        event({ key: "Backspace", metaKey: true, altKey: true }),
+        "MacIntel",
+      ),
+    );
+  });
+
+  it("ignores non-keydown events", () => {
+    assert.isNull(
+      terminalDeleteShortcutData(
+        event({ type: "keyup", key: "Backspace", metaKey: true }),
+        "MacIntel",
+      ),
     );
   });
 });

@@ -1,4 +1,5 @@
 import { memo, useState, useId } from "react";
+import type { EnvironmentId } from "@t3tools/contracts";
 import {
   buildCollapsedProposedPlanPreviewMarkdown,
   buildProposedPlanMarkdownFilename,
@@ -23,15 +24,18 @@ import {
   DialogPopup,
   DialogTitle,
 } from "../ui/dialog";
-import { toastManager } from "../ui/toast";
-import { readNativeApi } from "~/nativeApi";
+import { stackedThreadToast, toastManager } from "../ui/toast";
+import { readEnvironmentApi } from "~/environmentApi";
+import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 
 export const ProposedPlanCard = memo(function ProposedPlanCard({
   planMarkdown,
+  environmentId,
   cwd,
   workspaceRoot,
 }: {
   planMarkdown: string;
+  environmentId: EnvironmentId;
   cwd: string | undefined;
   workspaceRoot: string | undefined;
 }) {
@@ -39,6 +43,17 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
   const [isSaveDialogOpen, setIsSaveDialogOpen] = useState(false);
   const [savePath, setSavePath] = useState("");
   const [isSavingToWorkspace, setIsSavingToWorkspace] = useState(false);
+  const { copyToClipboard, isCopied } = useCopyToClipboard({
+    onError: (error) => {
+      toastManager.add(
+        stackedThreadToast({
+          type: "error",
+          title: "Could not copy plan",
+          description: error instanceof Error ? error.message : "An error occurred while copying.",
+        }),
+      );
+    },
+  });
   const savePathInputId = useId();
   const title = proposedPlanTitle(planMarkdown) ?? "Proposed plan";
   const lineCount = planMarkdown.split("\n").length;
@@ -54,13 +69,19 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
     downloadPlanAsTextFile(downloadFilename, saveContents);
   };
 
+  const handleCopyPlan = () => {
+    copyToClipboard(saveContents);
+  };
+
   const openSaveDialog = () => {
     if (!workspaceRoot) {
-      toastManager.add({
-        type: "error",
-        title: "Workspace path is unavailable",
-        description: "This thread does not have a workspace path to save into.",
-      });
+      toastManager.add(
+        stackedThreadToast({
+          type: "error",
+          title: "Workspace path is unavailable",
+          description: "This thread does not have a workspace path to save into.",
+        }),
+      );
       return;
     }
     setSavePath((existing) => (existing.length > 0 ? existing : downloadFilename));
@@ -68,7 +89,7 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
   };
 
   const handleSaveToWorkspace = () => {
-    const api = readNativeApi();
+    const api = readEnvironmentApi(environmentId);
     const relativePath = savePath.trim();
     if (!api || !workspaceRoot) {
       return;
@@ -97,11 +118,13 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
         });
       })
       .catch((error) => {
-        toastManager.add({
-          type: "error",
-          title: "Could not save plan",
-          description: error instanceof Error ? error.message : "An error occurred while saving.",
-        });
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Could not save plan",
+            description: error instanceof Error ? error.message : "An error occurred while saving.",
+          }),
+        );
       })
       .then(
         () => {
@@ -127,6 +150,9 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
             <EllipsisIcon aria-hidden="true" className="size-4" />
           </MenuTrigger>
           <MenuPopup align="end">
+            <MenuItem onClick={handleCopyPlan}>
+              {isCopied ? "Copied!" : "Copy to clipboard"}
+            </MenuItem>
             <MenuItem onClick={handleDownload}>Download as markdown</MenuItem>
             <MenuItem onClick={openSaveDialog} disabled={!workspaceRoot || isSavingToWorkspace}>
               Save to workspace

@@ -1,3 +1,4 @@
+// @effect-diagnostics nodeBuiltinImport:off
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 
@@ -66,17 +67,17 @@ export function attachmentRelativePath(attachment: ChatAttachment): string {
 }
 
 export function resolveAttachmentPath(input: {
-  readonly stateDir: string;
+  readonly attachmentsDir: string;
   readonly attachment: ChatAttachment;
 }): string | null {
   return resolveAttachmentRelativePath({
-    stateDir: input.stateDir,
+    attachmentsDir: input.attachmentsDir,
     relativePath: attachmentRelativePath(input.attachment),
   });
 }
 
 export function resolveAttachmentPathById(input: {
-  readonly stateDir: string;
+  readonly attachmentsDir: string;
   readonly attachmentId: string;
 }): string | null {
   const normalizedId = normalizeAttachmentRelativePath(input.attachmentId);
@@ -85,7 +86,7 @@ export function resolveAttachmentPathById(input: {
   }
   for (const extension of ATTACHMENT_FILENAME_EXTENSIONS) {
     const maybePath = resolveAttachmentRelativePath({
-      stateDir: input.stateDir,
+      attachmentsDir: input.attachmentsDir,
       relativePath: `${normalizedId}${extension}`,
     });
     if (maybePath && existsSync(maybePath)) {
