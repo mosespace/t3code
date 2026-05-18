@@ -117,7 +117,7 @@ describe("providerMaintenance", () => {
   });
 
   it("resolves npm update executables from known Windows CLI directories", () => {
-    const tempDir = path.join(os.tmpdir(), `t3-npm-windows-capabilities-${Date.now()}`);
+    const tempDir = path.join(os.tmpdir(), `t3-npm-windows-capabilities-${crypto.randomUUID()}`);
     const appData = path.join(tempDir, "AppData", "Roaming");
     const npmDir = path.join(appData, "npm");
     mkdirSync(npmDir, { recursive: true });

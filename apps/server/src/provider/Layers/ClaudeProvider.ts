@@ -37,7 +37,7 @@ import {
   spawnAndCollect,
   type ServerProviderDraft,
 } from "../providerSnapshot.ts";
-import { makeClaudeEnvironment } from "../Drivers/ClaudeHome.ts";
+import { makeClaudeEnvironment, resolveClaudeExecutableForSdk } from "../Drivers/ClaudeHome.ts";
 
 const DEFAULT_CLAUDE_MODEL_CAPABILITIES: ModelCapabilities = createModelCapabilities({
   optionDescriptors: [],
@@ -454,6 +454,10 @@ const probeClaudeCapabilities = (
   return Effect.gen(function* () {
     const claudeEnvironment = yield* makeClaudeEnvironment(claudeSettings, environment);
     return yield* Effect.tryPromise(async () => {
+      // The Claude Agent SDK uses child_process.spawn without shell:true, so
+      // .cmd wrappers (the norm for npm-installed tools on Windows) cannot be
+      // executed directly. Resolve to the underlying .exe when on Windows.
+      const executablePath = resolveClaudeExecutableForSdk(claudeSettings.binaryPath, claudeEnvironment);
       const q = claudeQuery({
         // Never yield — we only need initialization data, not a conversation.
         // This prevents any prompt from reaching the Anthropic API.
@@ -463,7 +467,7 @@ const probeClaudeCapabilities = (
         })(),
         options: {
           persistSession: false,
-          pathToClaudeCodeExecutable: claudeSettings.binaryPath,
+          pathToClaudeCodeExecutable: executablePath,
           abortController: abort,
           settingSources: ["user", "project", "local"],
           allowedTools: [],
