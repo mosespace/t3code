@@ -57,9 +57,14 @@ const CAPABILITIES_PROBE_TTL = Duration.minutes(5);
 function isClaudeNativeCommandPath(commandPath: string): boolean {
   const normalized = normalizeCommandPath(commandPath);
   return (
+    // macOS / Linux native installer
     normalized.endsWith("/.local/bin/claude") ||
     normalized.endsWith("/.local/bin/claude.exe") ||
-    normalized.includes("/.local/share/claude/")
+    normalized.includes("/.local/share/claude/") ||
+    // Windows: npm-installed .cmd wrapper — the underlying claude.exe supports `claude update`
+    normalized.endsWith("/claude.cmd") ||
+    // Windows: standalone native installer (AppData\Local\Programs\claude\)
+    normalized.includes("/appdata/local/programs/claude/")
   );
 }
 
