@@ -2241,7 +2241,7 @@ function T3Wordmark() {
   return (
     <svg
       aria-label="T3"
-      className="h-2.5 w-auto shrink-0 text-foreground"
+      className="h-2.5 w-auto shrink-0 text-primary"
       viewBox="15.5309 37 94.3941 56.96"
       xmlns="http://www.w3.org/2000/svg"
     >

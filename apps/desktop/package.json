@@ -6,7 +6,7 @@
   "main": "dist-electron/main.cjs",
   "scripts": {
     "dev": "bun run --parallel dev:bundle dev:electron",
-    "dev:bundle": "tsdown --watch",
+    "dev:bundle": "node scripts/dev-bundle.mjs",
     "dev:electron": "node scripts/dev-electron.mjs",
     "build": "tsdown",
     "start": "node scripts/start-electron.mjs",

@@ -396,11 +396,16 @@ export function resolveCommandPath(
   }
 
   const pathValue = resolvePathEnvironmentVariable(env);
-  if (pathValue.length === 0) return null;
-  const pathEntries = pathValue
-    .split(pathDelimiterForPlatform(platform))
-    .map((entry) => stripWrappingQuotes(entry.trim()))
-    .filter((entry) => entry.length > 0);
+  const pathEntries = [
+    ...(platform === "win32" ? resolveKnownWindowsCliDirs(env) : []),
+    ...(pathValue.length > 0
+      ? pathValue
+          .split(pathDelimiterForPlatform(platform))
+          .map((entry) => stripWrappingQuotes(entry.trim()))
+          .filter((entry) => entry.length > 0)
+      : []),
+  ];
+  if (pathEntries.length === 0) return null;
 
   for (const pathEntry of pathEntries) {
     for (const candidate of commandCandidates) {

@@ -5,6 +5,10 @@ import { join } from "node:path";
 import { desktopDir, resolveElectronPath } from "./electron-launcher.mjs";
 import { waitForResources } from "./wait-for-resources.mjs";
 
+if (!process.env.VITE_DEV_SERVER_URL && typeof process.loadEnvFile === "function") {
+  process.loadEnvFile(join(desktopDir, ".env"));
+}
+
 const devServerUrl = process.env.VITE_DEV_SERVER_URL?.trim();
 if (!devServerUrl) {
   throw new Error("VITE_DEV_SERVER_URL is required for desktop development.");

@@ -116,6 +116,38 @@ describe("providerMaintenance", () => {
     });
   });
 
+  it("resolves npm update executables from known Windows CLI directories", () => {
+    const tempDir = path.join(os.tmpdir(), `t3-npm-windows-capabilities-${Date.now()}`);
+    const appData = path.join(tempDir, "AppData", "Roaming");
+    const npmDir = path.join(appData, "npm");
+    mkdirSync(npmDir, { recursive: true });
+    writeFileSync(path.join(npmDir, "npm.cmd"), "@echo off\r\n");
+
+    const capabilities = packageToolUpdate.resolve({
+      platform: "win32",
+      env: {
+        PATH: "",
+        PATHEXT: ".COM;.EXE;.BAT;.CMD",
+        APPDATA: appData,
+        LOCALAPPDATA: path.join(tempDir, "AppData", "Local"),
+        USERPROFILE: tempDir,
+      },
+    });
+
+    expect(capabilities).toMatchObject({
+      provider: driver("packageTool"),
+      packageName: "@example/package-tool",
+      update: {
+        command: "npm install -g @example/package-tool@latest",
+        args: ["install", "-g", "@example/package-tool@latest"],
+        lockKey: "npm-global",
+      },
+    });
+    expect(capabilities.update?.executable.toLowerCase()).toBe(
+      path.join(npmDir, "npm.cmd").toLowerCase(),
+    );
+  });
+
   it("keeps update commands owned by provider maintenance capabilities", () => {
     expect(staticToolUpdate.resolve()).toEqual({
       provider: driver("staticTool"),

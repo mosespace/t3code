@@ -1,3 +1,6 @@
+import { mkdirSync, writeFileSync } from "node:fs";
+import os from "node:os";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -341,6 +344,27 @@ describe("resolveCommandPath", () => {
         env: { PATH: "", PATHEXT: ".COM;.EXE;.BAT;.CMD" },
       }),
     ).toBeNull();
+  });
+
+  it("searches known Windows CLI directories when PATH does not include them", () => {
+    const tempDir = join(os.tmpdir(), `t3-shell-${Date.now()}`);
+    const appData = join(tempDir, "AppData", "Roaming");
+    const npmDir = join(appData, "npm");
+    mkdirSync(npmDir, { recursive: true });
+    writeFileSync(join(npmDir, "npm.cmd"), "@echo off\r\n");
+
+    const resolved = resolveCommandPath("npm", {
+      platform: "win32",
+      env: {
+        PATH: "",
+        PATHEXT: ".COM;.EXE;.BAT;.CMD",
+        APPDATA: appData,
+        LOCALAPPDATA: join(tempDir, "AppData", "Local"),
+        USERPROFILE: tempDir,
+      },
+    });
+
+    expect(resolved?.toLowerCase()).toBe(join(npmDir, "npm.cmd").toLowerCase());
   });
 });
 

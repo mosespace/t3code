@@ -78,13 +78,16 @@ export function makeProviderMaintenanceCapabilities(input: {
   readonly updateExecutable: string | null;
   readonly updateArgs: ReadonlyArray<string>;
   readonly updateLockKey: string | null;
+  readonly updateDisplayCommand?: string | null;
+  readonly updateSpawnExecutable?: string | null;
 }): ProviderMaintenanceCapabilities {
   const update =
     input.updateExecutable === null || input.updateLockKey === null
       ? null
       : {
-          command: [input.updateExecutable, ...input.updateArgs].join(" "),
-          executable: input.updateExecutable,
+          command:
+            input.updateDisplayCommand ?? [input.updateExecutable, ...input.updateArgs].join(" "),
+          executable: input.updateSpawnExecutable ?? input.updateExecutable,
           args: input.updateArgs,
           lockKey: input.updateLockKey,
         };
@@ -110,13 +113,22 @@ export function makeManualOnlyProviderMaintenanceCapabilities(input: {
 
 function makeNpmGlobalProviderMaintenanceCapabilities(
   definition: PackageManagedProviderMaintenanceDefinition,
+  options?: ProviderMaintenanceCapabilityResolutionOptions,
 ): ProviderMaintenanceCapabilities {
+  const executable =
+    resolveCommandPath("npm", {
+      ...(options?.platform ? { platform: options.platform } : {}),
+      ...(options?.env ? { env: options.env } : {}),
+    }) ?? "npm";
+
   return makeProviderMaintenanceCapabilities({
     provider: definition.provider,
     packageName: definition.npmPackageName,
     updateExecutable: "npm",
     updateArgs: ["install", "-g", `${definition.npmPackageName}@latest`],
     updateLockKey: "npm-global",
+    updateDisplayCommand: `npm install -g ${definition.npmPackageName}@latest`,
+    updateSpawnExecutable: executable,
   });
 }
 
@@ -247,7 +259,7 @@ export function resolvePackageManagedProviderMaintenance(
 ): ProviderMaintenanceCapabilities {
   const binaryPath = nonEmptyString(options?.binaryPath);
   if (!binaryPath) {
-    return makeNpmGlobalProviderMaintenanceCapabilities(definition);
+    return makeNpmGlobalProviderMaintenanceCapabilities(definition, options);
   }
 
   const resolvedCommandPath =
@@ -269,7 +281,7 @@ export function resolvePackageManagedProviderMaintenance(
     ) {
       return (
         makeNativeProviderMaintenanceCapabilities(definition) ??
-        makeNpmGlobalProviderMaintenanceCapabilities(definition)
+        makeNpmGlobalProviderMaintenanceCapabilities(definition, options)
       );
     }
     if (commandPaths.some(isVitePlusGlobalCommandPath)) {
@@ -282,7 +294,7 @@ export function resolvePackageManagedProviderMaintenance(
       return makePnpmGlobalProviderMaintenanceCapabilities(definition);
     }
     if (commandPaths.some(isNpmGlobalCommandPath)) {
-      return makeNpmGlobalProviderMaintenanceCapabilities(definition);
+      return makeNpmGlobalProviderMaintenanceCapabilities(definition, options);
     }
     if (commandPaths.some(isHomebrewCommandPath)) {
       return makeHomebrewProviderMaintenanceCapabilities(definition);
@@ -290,7 +302,7 @@ export function resolvePackageManagedProviderMaintenance(
   }
 
   if (!hasPathSeparator(binaryPath)) {
-    return makeNpmGlobalProviderMaintenanceCapabilities(definition);
+    return makeNpmGlobalProviderMaintenanceCapabilities(definition, options);
   }
 
   return makeManualOnlyProviderMaintenanceCapabilities({
